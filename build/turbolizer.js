@@ -16335,246 +16335,6 @@
       }
   }
 
-  // Copyright 2015 the V8 project authors. All rights reserved.
-  class CodeView extends View {
-      constructor(parent, broker, sourceFunction, sourceResolver, codeMode) {
-          super(parent);
-          this.broker = broker;
-          this.source = sourceFunction;
-          this.sourceResolver = sourceResolver;
-          this.codeMode = codeMode;
-          this.sourcePositionToHtmlElements = new Map();
-          this.showAdditionalInliningPosition = false;
-          this.sourcePositionSelection = new SelectionMap((gp) => gp.toString());
-          this.sourcePositionSelectionHandler = this.initializeSourcePositionSelectionHandler();
-          broker.addSourcePositionHandler(this.sourcePositionSelectionHandler);
-          this.initializeCode();
-      }
-      createViewElement() {
-          const sourceContainer = document.createElement("div");
-          sourceContainer.classList.add("source-container");
-          return sourceContainer;
-      }
-      initializeCode() {
-          const view = this;
-          const source = this.source;
-          const sourceText = source.sourceText;
-          if (!sourceText)
-              return;
-          const sourceContainer = view.divNode;
-          if (this.codeMode == CodeMode.MainSource) {
-              sourceContainer.classList.add("main-source");
-          }
-          else {
-              sourceContainer.classList.add("inlined-source");
-          }
-          const codeHeader = document.createElement("div");
-          codeHeader.setAttribute("id", this.getCodeHeaderHtmlElementName());
-          codeHeader.classList.add("code-header");
-          const codeFileFunction = document.createElement("div");
-          codeFileFunction.classList.add("code-file-function");
-          codeFileFunction.innerHTML = `${source.sourceName}:${source.functionName}`;
-          codeHeader.appendChild(codeFileFunction);
-          const codeModeDiv = document.createElement("div");
-          codeModeDiv.classList.add("code-mode");
-          codeModeDiv.innerHTML = this.codeMode;
-          codeHeader.appendChild(codeModeDiv);
-          const clearDiv = document.createElement("div");
-          clearDiv.style.clear = "both";
-          codeHeader.appendChild(clearDiv);
-          sourceContainer.appendChild(codeHeader);
-          const codePre = document.createElement("pre");
-          codePre.setAttribute("id", this.getCodeHtmlElementName());
-          codePre.classList.add("prettyprint");
-          sourceContainer.appendChild(codePre);
-          codeHeader.onclick = function myFunction() {
-              if (codePre.style.display === "none") {
-                  codePre.style.display = "block";
-              }
-              else {
-                  codePre.style.display = "none";
-              }
-          };
-          if (sourceText !== "") {
-              codePre.classList.add("linenums");
-              codePre.textContent = sourceText;
-              try {
-                  // Wrap in try to work when offline.
-                  PR.prettyPrint(undefined, sourceContainer);
-              }
-              catch (e) {
-                  console.log(e);
-              }
-              view.divNode.onclick = function (e) {
-                  if (e.target instanceof Element && e.target.tagName === "DIV") {
-                      const targetDiv = e.target;
-                      if (targetDiv.classList.contains("line-number")) {
-                          e.stopPropagation();
-                          view.onSelectLine(Number(targetDiv.dataset.lineNumber), !e.shiftKey);
-                      }
-                  }
-                  else {
-                      view.sourcePositionSelectionHandler.clear();
-                  }
-              };
-              const base = source.startPosition;
-              let current = 0;
-              const lineListDiv = this.getHtmlCodeLines();
-              let newlineAdjust = 0;
-              for (let i = 0; i < lineListDiv.length; i++) {
-                  // Line numbers are not zero-based.
-                  const lineNumber = i + 1;
-                  const currentLineElement = lineListDiv[i];
-                  currentLineElement.id = `li${i}`;
-                  currentLineElement.dataset.lineNumber = String(lineNumber);
-                  const spans = currentLineElement.childNodes;
-                  for (const currentSpan of spans) {
-                      if (currentSpan instanceof HTMLSpanElement) {
-                          const pos = base + current;
-                          const end = pos + currentSpan.textContent.length;
-                          current += currentSpan.textContent.length;
-                          this.insertSourcePositions(currentSpan, lineNumber, pos, end, newlineAdjust);
-                          newlineAdjust = 0;
-                      }
-                  }
-                  this.insertLineNumber(currentLineElement, lineNumber);
-                  while ((current < sourceText.length) &&
-                      (sourceText[current] === "\n" || sourceText[current] === "\r")) {
-                      ++current;
-                      ++newlineAdjust;
-                  }
-              }
-          }
-      }
-      initializeSourcePositionSelectionHandler() {
-          const view = this;
-          const broker = this.broker;
-          const sourceResolver = this.sourceResolver;
-          return {
-              select: function (sourcePositions, selected) {
-                  const locations = new Array();
-                  for (const sourcePosition of sourcePositions) {
-                      locations.push(sourcePosition);
-                      sourceResolver.addInliningPositions(sourcePosition, locations);
-                  }
-                  if (locations.length == 0)
-                      return;
-                  view.sourcePositionSelection.select(locations, selected);
-                  view.updateSelection();
-                  broker.broadcastSourcePositionSelect(this, locations, selected);
-              },
-              clear: function () {
-                  view.sourcePositionSelection.clear();
-                  view.updateSelection();
-                  broker.broadcastClear(this);
-              },
-              brokeredSourcePositionSelect: function (locations, selected) {
-                  const firstSelect = view.sourcePositionSelection.isEmpty();
-                  for (const location of locations) {
-                      const translated = sourceResolver.translateToSourceId(view.source.sourceId, location);
-                      if (!translated)
-                          continue;
-                      view.sourcePositionSelection.select([translated], selected);
-                  }
-                  view.updateSelection(firstSelect);
-              },
-              brokeredClear: function () {
-                  view.sourcePositionSelection.clear();
-                  view.updateSelection();
-              },
-          };
-      }
-      addHtmlElementToSourcePosition(sourcePosition, element) {
-          const key = sourcePosition.toString();
-          if (!this.sourcePositionToHtmlElements.has(key)) {
-              this.sourcePositionToHtmlElements.set(key, new Array());
-          }
-          this.sourcePositionToHtmlElements.get(key).push(element);
-      }
-      updateSelection(scrollIntoView = false) {
-          const mkVisible = new ViewElements(this.divNode.parentNode);
-          for (const [sp, els] of this.sourcePositionToHtmlElements.entries()) {
-              const isSelected = this.sourcePositionSelection.isKeySelected(sp);
-              for (const el of els) {
-                  mkVisible.consider(el, isSelected);
-                  el.classList.toggle("selected", isSelected);
-              }
-          }
-          mkVisible.apply(scrollIntoView);
-      }
-      getCodeHtmlElementName() {
-          return `source-pre-${this.source.sourceId}`;
-      }
-      getCodeHeaderHtmlElementName() {
-          return `source-pre-${this.source.sourceId}-header`;
-      }
-      getHtmlCodeLines() {
-          const orderList = this.divNode.querySelector(`#${this.getCodeHtmlElementName()} ol`);
-          return orderList.childNodes;
-      }
-      onSelectLine(lineNumber, doClear) {
-          if (doClear) {
-              this.sourcePositionSelectionHandler.clear();
-          }
-          const positions = this.sourceResolver.lineToSourcePositions(lineNumber - 1);
-          if (positions !== undefined) {
-              this.sourcePositionSelectionHandler.select(positions, undefined);
-          }
-      }
-      onSelectSourcePosition(sourcePosition, doClear) {
-          if (doClear) {
-              this.sourcePositionSelectionHandler.clear();
-          }
-          this.sourcePositionSelectionHandler.select([sourcePosition], undefined);
-      }
-      insertSourcePositions(currentSpan, lineNumber, pos, end, adjust) {
-          const view = this;
-          const sps = this.sourceResolver.sourcePositionsInRange(this.source.sourceId, pos - adjust, end);
-          let offset = 0;
-          for (const sourcePosition of sps) {
-              // Internally, line numbers are 0-based so we have to substract 1 from the line number. This
-              // path in only taken by non-Wasm code. Wasm code relies on setSourceLineToBytecodePosition.
-              this.sourceResolver.addAnyPositionToLine(lineNumber - 1, sourcePosition);
-              const textNode = currentSpan.tagName === "SPAN" ? currentSpan.lastChild : currentSpan;
-              if (!(textNode instanceof Text))
-                  continue;
-              const splitLength = Math.max(0, sourcePosition.scriptOffset - pos - offset);
-              offset += splitLength;
-              const replacementNode = textNode.splitText(splitLength);
-              const span = document.createElement("span");
-              span.setAttribute("scriptOffset", sourcePosition.scriptOffset.toString());
-              span.classList.add("source-position");
-              const marker = document.createElement("span");
-              marker.classList.add("marker");
-              span.appendChild(marker);
-              const inlining = this.sourceResolver.getInliningForPosition(sourcePosition);
-              if (inlining && view.showAdditionalInliningPosition) {
-                  const sourceName = this.sourceResolver.getSourceName(inlining.sourceId);
-                  const inliningMarker = document.createElement("span");
-                  inliningMarker.classList.add("inlining-marker");
-                  inliningMarker.setAttribute("data-descr", `${sourceName} was inlined here`);
-                  span.appendChild(inliningMarker);
-              }
-              span.onclick = function (e) {
-                  e.stopPropagation();
-                  view.onSelectSourcePosition(sourcePosition, !e.shiftKey);
-              };
-              view.addHtmlElementToSourcePosition(sourcePosition, span);
-              textNode.parentNode.insertBefore(span, replacementNode);
-          }
-      }
-      insertLineNumber(lineElement, lineNumber) {
-          const lineNumberElement = document.createElement("div");
-          lineNumberElement.classList.add("line-number");
-          lineNumberElement.dataset.lineNumber = String(lineNumber);
-          lineNumberElement.innerText = String(lineNumber);
-          lineElement.insertBefore(lineNumberElement, lineElement.firstChild);
-          for (const sourcePosition of this.sourceResolver.lineToSourcePositions(lineNumber - 1)) {
-              this.addHtmlElementToSourcePosition(sourcePosition, lineElement);
-          }
-      }
-  }
-
   // Copyright 2022 the V8 project authors. All rights reserved.
   // Use of this source code is governed by a BSD-style license that can be
   // found in the LICENSE file.
@@ -17497,142 +17257,6 @@
       HistoryChange[HistoryChange["Survived"] = 5] = "Survived";
   })(HistoryChange || (HistoryChange = {}));
 
-  // Copyright 2022 the V8 project authors. All rights reserved.
-  class BytecodeSourceView extends View {
-      constructor(parent, broker, sourceFunction, sourceResolver, codeMode) {
-          super(parent);
-          this.broker = broker;
-          this.source = sourceFunction;
-          this.sourceResolver = sourceResolver;
-          this.codeMode = codeMode;
-          this.bytecodeOffsetToHtmlElement = new Map();
-          this.bytecodeOffsetSelection = new SelectionMap((offset) => String(offset));
-          this.bytecodeOffsetSelectionHandler = this.initializeBytecodeOffsetSelectionHandler();
-          this.broker.addBytecodeOffsetHandler(this.bytecodeOffsetSelectionHandler);
-          this.initializeCode();
-      }
-      createViewElement() {
-          return createElement("div", "bytecode-source-container");
-      }
-      initializeCode() {
-          const view = this;
-          const source = this.source;
-          const bytecodeContainer = this.divNode;
-          bytecodeContainer.classList.add(view.getSourceClass());
-          const bytecodeHeader = createElement("div", "code-header");
-          bytecodeHeader.setAttribute("id", view.getBytecodeHeaderHtmlElementName());
-          const codeFileFunction = createElement("div", "code-file-function", source.functionName);
-          bytecodeHeader.appendChild(codeFileFunction);
-          const codeMode = createElement("div", "code-mode", view.codeMode);
-          bytecodeHeader.appendChild(codeMode);
-          const clearElement = document.createElement("div");
-          clearElement.style.clear = "both";
-          bytecodeHeader.appendChild(clearElement);
-          bytecodeContainer.appendChild(bytecodeHeader);
-          const codePre = createElement("pre", "prettyprint linenums");
-          codePre.setAttribute("id", view.getBytecodeHtmlElementName());
-          bytecodeContainer.appendChild(codePre);
-          bytecodeHeader.onclick = () => {
-              codePre.style.display = codePre.style.display === "none" ? "block" : "none";
-          };
-          const sourceList = createElement("ol", "linenums");
-          for (const bytecodeSource of view.source.data) {
-              const currentLine = createElement("li", `L${bytecodeSource.offset}`);
-              currentLine.setAttribute("id", `li${bytecodeSource.offset}`);
-              view.insertLineContent(currentLine, bytecodeSource.disassembly);
-              view.insertLineNumber(currentLine, bytecodeSource.offset);
-              view.bytecodeOffsetToHtmlElement.set(bytecodeSource.offset, currentLine);
-              sourceList.appendChild(currentLine);
-          }
-          codePre.appendChild(sourceList);
-          if (!view.source.constantPool)
-              return;
-          const constantList = createElement("ol", "linenums constants");
-          const constantListHeader = createElement("li", "");
-          view.insertLineContent(constantListHeader, `Constant pool (size = ${view.source.constantPool.length})`);
-          constantList.appendChild(constantListHeader);
-          for (const [idx, constant] of view.source.constantPool.entries()) {
-              const currentLine = createElement("li", `C${idx}`);
-              view.insertLineContent(currentLine, `${idx}: ${constant}`);
-              constantList.appendChild(currentLine);
-          }
-          codePre.appendChild(constantList);
-      }
-      initializeBytecodeOffsetSelectionHandler() {
-          const view = this;
-          const broker = this.broker;
-          return {
-              select: function (offsets, selected) {
-                  const bytecodePositions = new Array();
-                  for (const offset of offsets) {
-                      view.source.inliningIds.forEach(inliningId => bytecodePositions.push(new BytecodePosition(offset, inliningId)));
-                  }
-                  view.bytecodeOffsetSelection.select(offsets, selected);
-                  view.updateSelection();
-                  broker.broadcastBytecodePositionsSelect(this, bytecodePositions, selected);
-              },
-              clear: function () {
-                  view.bytecodeOffsetSelection.clear();
-                  view.updateSelection();
-                  broker.broadcastClear(this);
-              },
-              brokeredBytecodeOffsetSelect: function (positions, selected) {
-                  const offsets = new Array();
-                  const firstSelect = view.bytecodeOffsetSelection.isEmpty();
-                  for (const position of positions) {
-                      if (view.source.inliningIds.includes(position.inliningId)) {
-                          offsets.push(position.bytecodePosition);
-                      }
-                  }
-                  view.bytecodeOffsetSelection.select(offsets, selected);
-                  view.updateSelection(firstSelect);
-              },
-              brokeredClear: function () {
-                  view.bytecodeOffsetSelection.clear();
-                  view.updateSelection();
-              },
-          };
-      }
-      getBytecodeHeaderHtmlElementName() {
-          return `source-pre-${this.source.sourceId}-header`;
-      }
-      getBytecodeHtmlElementName() {
-          return `source-pre-${this.source.sourceId}`;
-      }
-      getSourceClass() {
-          return this.codeMode == CodeMode.MainSource ? "main-source" : "inlined-source";
-      }
-      updateSelection(scrollIntoView = false) {
-          const mkVisible = new ViewElements(this.divNode.parentNode);
-          for (const [offset, element] of this.bytecodeOffsetToHtmlElement.entries()) {
-              const key = this.bytecodeOffsetSelection.stringKey(offset);
-              const isSelected = this.bytecodeOffsetSelection.isKeySelected(key);
-              mkVisible.consider(element, isSelected);
-              element.classList.toggle("selected", isSelected);
-          }
-          mkVisible.apply(scrollIntoView);
-      }
-      onSelectBytecodeOffset(offset, doClear) {
-          if (doClear) {
-              this.bytecodeOffsetSelectionHandler.clear();
-          }
-          this.bytecodeOffsetSelectionHandler.select([offset], undefined);
-      }
-      insertLineContent(lineElement, content) {
-          const lineContentElement = createElement("span", "", content);
-          lineElement.appendChild(lineContentElement);
-      }
-      insertLineNumber(lineElement, lineNumber) {
-          const view = this;
-          const lineNumberElement = createElement("div", "line-number", String(lineNumber));
-          lineNumberElement.onclick = function (e) {
-              e.stopPropagation();
-              view.onSelectBytecodeOffset(lineNumber, !e.shiftKey);
-          };
-          lineElement.insertBefore(lineNumberElement, lineElement.firstChild);
-      }
-  }
-
   // Copyright 2017 the V8 project authors. All rights reserved.
   window.onload = function () {
       let multiview;
@@ -17685,28 +17309,31 @@
               sourceResolver.setBytecodeSources(jsonObj.bytecodeSources);
               sourceResolver.setFinalNodeOrigins(jsonObj.nodeOrigins);
               sourceResolver.parsePhases(jsonObj.phases);
-              const [sourceTab, sourceContainer] = sourceTabs.addTabAndContent("Source");
-              sourceContainer.classList.add("viewpane", "scrollable");
-              sourceTabs.activateTab(sourceTab);
-              const sourceView = new CodeView(sourceContainer, selectionBroker, mainFunction, sourceResolver, CodeMode.MainSource);
-              sourceView.show();
-              sourceViews.push(sourceView);
-              for (const source of sourceResolver.sources) {
-                  const sourceView = new CodeView(sourceContainer, selectionBroker, source, sourceResolver, CodeMode.InlinedSource);
-                  sourceView.show();
-                  sourceViews.push(sourceView);
-              }
-              if (sourceResolver.bytecodeSources.size > 0) {
-                  const [_, bytecodeContainer] = sourceTabs.addTabAndContent("Bytecode");
-                  bytecodeContainer.classList.add("viewpane", "scrollable");
-                  const bytecodeSources = Array.from(sourceResolver.bytecodeSources.values()).reverse();
-                  for (const source of bytecodeSources) {
-                      const codeMode = source.sourceId == -1 ? CodeMode.MainSource : CodeMode.InlinedSource;
-                      const bytecodeSourceView = new BytecodeSourceView(bytecodeContainer, selectionBroker, source, sourceResolver, codeMode);
-                      bytecodeSourceView.show();
-                      bytecodeSourceViews.push(bytecodeSourceView);
-                  }
-              }
+              // const [sourceTab, sourceContainer] = sourceTabs.addTabAndContent("Source");
+              // sourceContainer.classList.add("viewpane", "scrollable");
+              // sourceTabs.activateTab(sourceTab);
+              // const sourceView = new CodeView(sourceContainer, selectionBroker, mainFunction,
+              //   sourceResolver, CodeMode.MainSource);
+              // sourceView.show();
+              // sourceViews.push(sourceView);
+              // for (const source of sourceResolver.sources) {
+              //   const sourceView = new CodeView(sourceContainer, selectionBroker, source,
+              //     sourceResolver, CodeMode.InlinedSource);
+              //   sourceView.show();
+              //   sourceViews.push(sourceView);
+              // }
+              // if (sourceResolver.bytecodeSources.size > 0) {
+              //   const [_, bytecodeContainer] = sourceTabs.addTabAndContent("Bytecode");
+              //   bytecodeContainer.classList.add("viewpane", "scrollable");
+              //   const bytecodeSources = Array.from(sourceResolver.bytecodeSources.values()).reverse();
+              //   for (const source of bytecodeSources) {
+              //     const codeMode = source.sourceId == -1 ? CodeMode.MainSource : CodeMode.InlinedSource;
+              //     const bytecodeSourceView = new BytecodeSourceView(bytecodeContainer, selectionBroker,
+              //       source, sourceResolver, codeMode);
+              //     bytecodeSourceView.show();
+              //     bytecodeSourceViews.push(bytecodeSourceView);
+              //   }
+              // }
               // const [disassemblyTab, disassemblyContainer] = disassemblyTabs.addTabAndContent("Disassembly");
               // disassemblyContainer.classList.add("viewpane", "scrollable");
               // disassemblyTabs.activateTab(disassemblyTab);
