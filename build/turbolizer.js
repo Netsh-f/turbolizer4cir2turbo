@@ -12106,6 +12106,9 @@
               case 69: // 'e'
                   this.showSelectionFrontierNodes(event.altKey, (edge) => edge.type === "effect", true);
                   break;
+              case 86: // 'v'
+                  this.showSelectionFrontierNodes(event.altKey, (edge) => edge.type === "value", true);
+                  break;
               case 72: // 'h'
                   this.showHoveredNodeHistory();
                   break;
